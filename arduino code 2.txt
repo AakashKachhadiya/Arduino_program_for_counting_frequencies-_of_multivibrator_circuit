@@ -1,0 +1,103 @@
+// This code measure the frequency of an incoming 
+// square-wave signal using Timer/Counter 1 and the onboard 
+// comparator. The signal I am measuring has a duty-cycle of 
+// 50% but the code should work regardless of the duty-cycle.
+// It should also work for non-square-wave signals so long as
+// the signal voltage drops below the bandgap voltage of the
+// onboard comparator (approximately 1.1 V) and is sufficiently
+// clean to prevent bouncing. 
+
+// A variable to keep track of the number of overflows on 
+// Timer/Counter 1.
+volatile unsigned int overflows = 0; 
+
+// A variable to keep track of how many rising edges of the 
+// signal have been counted.
+volatile unsigned long edges = 0; 
+
+// A variable to keep track of the count on Timer/Counter 1
+// when I start counting the edges of the signal.
+volatile unsigned long tstart = 0;
+
+// A variable to keep track of the count on Timer/Counter 1
+// when I stop counting the edges of the signal.
+volatile unsigned long tstop = 0;
+
+// A variable to store temporarily store the count on 
+// Timer/Counter 1.
+volatile unsigned long tnow = 0;
+
+// This specifies how many cycles over which I want to 
+// average the frequency.
+const unsigned long cycles = 1000; 
+
+// A variable to store the currently measured frequency
+float frequency = 0;
+
+void setup(void) {
+pinMode(7,INPUT); // This is the analog comparator negative input.
+// This is where the input signal enters the Arduino.
+
+SREG = SREG | B10000000; // Enable gobal interrupts. They should 
+// already be enabled but I like to do this out of good measure.
+
+Serial.begin(9600); // For printing the frequency to the terminal
+}
+
+void loop(void) {
+delay(500);
+measureFreq();
+Serial.println(frequency);
+delay(500);
+}
+
+void measureFreq(void) {
+edges = 0;
+
+ACSR = ACSR | B01000010; // enable analog comparator interrupt 
+// on failing edge (bit 1) which would actually capture a rising
+// edge of the signal and use the internal bandgap reference
+// voltage as the positive input (bit 6).
+delay(5); // A short wait for bandgap voltage to stabilize.
+
+overflows = 0;
+
+TCCR1A = B00000000; // Set Timer/Counter 1 in normal mode where 
+// it will count to 0xFFFF then repeat.
+TIMSK1 = TIMSK1 | B00000001; // Turn on Timer/Counter 1 overflow 
+// interrupt (bit 0).
+
+// Turn on the counter with no prescaler.
+TCCR1B = TCCR1B | B00000001;
+
+ACSR = ACSR | B00001000; // Enable analog comparator interrupt 
+// (bit 3).
+
+while (edges < (cycles+1)) {
+// Do nothing.
+}
+
+// Calculate the frequency.
+frequency = (float)16000000*(float)cycles/(float)(tstop - tstart);
+
+}
+
+ISR(TIMER1_OVF_vect)
+{
+overflows += 1;
+}
+
+ISR(ANALOG_COMP_vect)
+{
+tnow = TCNT1; // current time
+edges += 1;
+if (edges == 1) { // Start counting edges.
+tstart = overflows*65536 + tnow;
+}
+else if (edges == cycles + 1) { // Stop counting edges.
+tstop = overflows*65536 + tnow;
+// Turn off Timer/Counter 1 and the comparator.
+ACSR = 0;
+TCCR1B = 0;
+}
+}
